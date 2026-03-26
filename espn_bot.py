@@ -165,7 +165,7 @@ def get_injury_alerts(league):
                 status = getattr(player, "injuryStatus", "ACTIVE")
                 if status and status not in ("ACTIVE", "NORMAL", "NA", ""):
                     alerts.append(
-                        f"⚠️ **{team.team_name}**: {player.name} — {status}"
+                        f"⚠️ **{team.team_name}**: {player.name} — {status.replace('_', ' ').replace('DAY DL', 'DAY IL')}"
                     )
         if alerts:
             lines.extend(alerts)

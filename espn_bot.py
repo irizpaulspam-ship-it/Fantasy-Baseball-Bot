@@ -145,7 +145,7 @@ def get_trophies(league):
         biggest_win_diff, biggest_win_team, biggest_win_loser, bw_hs, bw_as = margins[0]
         closest_win_diff, closest_win_team, closest_win_loser, cw_hs, cw_as = margins[-1]
  
-        lines = [f"🏆 **Week {current_week} Trophies**\n"]
+        lines = [f"🏆 **Last Week Trophies**\n"]
         lines.append(f"🔥 **High Score:** {high_score_team.team_name} — {high_score_val:.1f} pts")
         lines.append(f"💩 **Low Score:** {low_score_team.team_name} — {low_score_val:.1f} pts")
         lines.append(
@@ -160,11 +160,11 @@ def get_trophies(league):
     except Exception as e:
         return f"⚠️ Could not fetch trophies: {e}"
  
-# ─── Feature: Waiver Report ───────────────────────────────────────────────────
-def get_waiver_report(league):
+# ─── Feature: Transactions ────────────────────────────────────────────────────
+def get_transactions(league):
     try:
         activity = league.recent_activity(size=25)
-        lines = ["📋 **Recent Waiver / FA Activity**\n"]
+        lines = ["🔄 **Recent Transactions**\n"]
         found = False
         for action in activity:
             for team, move, player in action.actions:
@@ -178,10 +178,10 @@ def get_waiver_report(league):
                     lines.append(f"{emoji} **{team.team_name}** — {clean_move}: {player.name}")
                     found = True
         if not found:
-            lines.append("No recent waiver activity.")
+            lines.append("No recent transactions.")
         return "\n".join(lines)
     except Exception as e:
-        return f"⚠️ Could not fetch waiver report: {e}"
+        return f"⚠️ Could not fetch transactions: {e}"
  
 # ─── Feature: Injury / Lineup Alerts ─────────────────────────────────────────
 def get_injury_alerts(league):
@@ -210,23 +210,23 @@ def get_injury_alerts(league):
 # ─── Schedule logic ───────────────────────────────────────────────────────────
 def should_run(task: str) -> bool:
     """
-    Monday   : Scoreboard, Trophies
-    Tuesday  : Standings, Power Rankings
-    Wednesday: Waiver Report, Matchups
-    Thursday : Injury/Lineup Alerts
-    Friday   : Scoreboard
-    Saturday : (quiet)
-    Sunday   : Scoreboard, Injury Alerts
+    Monday    : Matchups (new week) + Trophies (last week)
+    Tuesday   : Scoreboard + Transactions
+    Wednesday : Scoreboard + Transactions
+    Thursday  : Scoreboard + Standings
+    Friday    : Scoreboard + Transactions
+    Saturday  : Scoreboard + Injury Alerts
+    Sunday    : Scoreboard + Power Rankings
     """
     day = datetime.now().weekday()  # 0=Mon ... 6=Sun
     schedule = {
-        "scoreboard":     [0, 4, 6],
-        "trophies":       [0],
-        "standings":      [1],
-        "power_rankings": [1],
-        "waiver_report":  [2],
-        "matchups":       [2],
-        "injury_alerts":  [3, 6],
+        "scoreboard":     [1, 2, 3, 4, 5, 6],  # Tue-Sun
+        "matchups":       [0],                   # Mon only
+        "trophies":       [0],                   # Mon only
+        "transactions":   [1, 2, 4],             # Tue, Wed, Fri
+        "standings":      [3],                   # Thu only
+        "injury_alerts":  [5],                   # Sat only
+        "power_rankings": [6],                   # Sun only
     }
     return day in schedule.get(task, [])
  
@@ -253,13 +253,13 @@ def main():
     league = get_league()
  
     task_map = {
-        "scoreboard":     get_scoreboard,
-        "standings":      get_standings,
         "matchups":       get_matchups,
-        "power_rankings": get_power_rankings,
         "trophies":       get_trophies,
-        "waiver_report":  get_waiver_report,
+        "scoreboard":     get_scoreboard,
+        "transactions":   get_transactions,
+        "standings":      get_standings,
         "injury_alerts":  get_injury_alerts,
+        "power_rankings": get_power_rankings,
     }
  
     for task, fn in task_map.items():

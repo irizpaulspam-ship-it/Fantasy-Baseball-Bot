@@ -1,6 +1,8 @@
 import os
 import tempfile
+import threading
 import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
 from espn_api.baseball import League
  
@@ -12,11 +14,32 @@ SWID             = os.environ.get("SWID", "")
 DISCORD_WEBHOOK  = os.environ["DISCORD_WEBHOOK_URL"]
 INIT_MSG         = os.environ.get("INIT_MSG", "")
  
+# ─── Tiny web server so Render stays alive ────────────────────────────────────
+class PingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/run":
+            threading.Thread(target=main).start()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot triggered!")
+        else:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Fantasy Baseball Bot is running!")
+ 
+    def log_message(self, format, *args):
+        pass  # Suppress noisy request logs
+ 
+def start_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), PingHandler)
+    print(f"Web server running on port {port}")
+    server.serve_forever()
+ 
 # ─── Discord helper ───────────────────────────────────────────────────────────
 def send_discord(message: str):
     if not message or not message.strip():
         return
-    # Discord has a 2000 char limit per message
     chunks = [message[i:i+1900] for i in range(0, len(message), 1900)]
     for chunk in chunks:
         payload = {"content": chunk}
@@ -207,7 +230,7 @@ def should_run(task: str) -> bool:
     }
     return day in schedule.get(task, [])
  
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# ─── Main (runs on ping or startup) ──────────────────────────────────────────
 def main():
     # ── Time window check (8am-10am Eastern) ──────────────────────────────────
     now = datetime.utcnow() - timedelta(hours=4)  # UTC-4 = Eastern Daylight Time
@@ -247,5 +270,11 @@ def main():
         else:
             print(f"[{task}] skipped (not scheduled today).")
  
+# ─── Entry point ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # Start the web server in the background
+    threading.Thread(target=start_server, daemon=True).start()
+    # Run the bot once on startup
     main()
+    # Keep the process alive so Render doesn't shut down
+    threading.Event().wait()

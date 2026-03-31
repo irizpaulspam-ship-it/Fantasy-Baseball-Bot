@@ -21,11 +21,11 @@ class PingHandler(BaseHTTPRequestHandler):
             threading.Thread(target=main).start()
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"OK")  # Short response to avoid cron-job.org output too large error
+            self.wfile.write(b"OK")
         else:
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"OK")  # Short response for UptimeRobot ping
+            self.wfile.write(b"OK")
  
     def log_message(self, format, *args):
         pass  # Suppress noisy request logs
@@ -58,7 +58,7 @@ def get_league():
 def get_scoreboard(league):
     try:
         box_scores = league.box_scores()
-        lines = [f"⚾ **Current Week Scoreboard**\n"]
+        lines = ["⚾ **Current Week Scoreboard**\n"]
         for match in box_scores:
             home = match.home_team
             away = match.away_team
@@ -91,7 +91,7 @@ def get_standings(league):
 def get_matchups(league):
     try:
         box_scores = league.box_scores()
-        lines = [f"🗓️ **Current Week Matchups**\n"]
+        lines = ["🗓️ **Current Week Matchups**\n"]
         for match in box_scores:
             home = match.home_team
             away = match.away_team
@@ -143,25 +143,34 @@ def get_trophies(league):
     except Exception as e:
         return f"⚠️ Could not fetch trophies: {e}"
  
-# ─── Feature: Transactions ────────────────────────────────────────────────────
+# ─── Feature: Transactions (daily, last 28hrs) ───────────────────────────────
 def get_transactions(league):
     try:
         activity = league.recent_activity(size=25)
         lines = ["🔄 **Recent Transactions**\n"]
         found = False
+ 
+        cutoff = datetime.utcnow() - timedelta(hours=28)  # 28hrs to catch overnight activity
+ 
         for action in activity:
+            action_date = getattr(action, 'date', None)
+            if action_date and action_date < cutoff:
+                continue
+ 
             for team, move, player in action.actions:
-                if move in ("WAIVER ADDED", "FA ADDED", "DROPPED"):
+                if move in ("WAIVER ADDED", "FA ADDED", "DROPPED", "ADDED"):
                     emoji = "➕" if "ADDED" in move else "➖"
                     clean_move = (move
-                        .replace('_', ' ')
                         .replace('WAIVER ADDED', 'Added (Waiver)')
                         .replace('FA ADDED', 'Added (FA)')
+                        .replace('ADDED', 'Added (FA)')
                         .replace('DROPPED', 'Dropped'))
-                    lines.append(f"{emoji} **{team.team_name}** — {clean_move}: {player.name}")
+                    player_name = player if isinstance(player, str) else player.name
+                    lines.append(f"{emoji} **{team.team_name}** — {clean_move}: {player_name}")
                     found = True
+ 
         if not found:
-            lines.append("No recent transactions.")
+            lines.append("No transactions completed since last report.")
         return "\n".join(lines)
     except Exception as e:
         return f"⚠️ Could not fetch transactions: {e}"
@@ -193,7 +202,6 @@ def get_injury_alerts(league):
 # ─── Feature: Division Rankings ──────────────────────────────────────────────
 def get_division_rankings(league):
     try:
-        # Group teams by division
         divisions = {}
         for team in league.teams:
             div = getattr(team, "division_id", None)
@@ -205,12 +213,10 @@ def get_division_rankings(league):
         if not divisions:
             return "🏟️ **Division Rankings** — No divisions found in this league."
  
-        # Build streak per team
         def get_streak(team):
             outcomes = getattr(team, "outcomes", [])
             if not outcomes:
                 return "—"
-            # outcomes is a list like ['W','W','L'] most recent last
             streak_char = outcomes[-1]
             count = 0
             for result in reversed(outcomes):
@@ -240,7 +246,7 @@ def get_division_rankings(league):
                     f"{team.points_for:.1f} pts | "
                     f"{streak}"
                 )
-            lines.append("")  # blank line between divisions
+            lines.append("")
  
         return "\n".join(lines).strip()
     except Exception as e:
@@ -249,27 +255,27 @@ def get_division_rankings(league):
 # ─── Schedule logic ───────────────────────────────────────────────────────────
 def should_run(task: str) -> bool:
     """
-    Monday    : Matchups (new week) + Trophies (last week)
+    Monday    : Matchups + Trophies + Transactions
     Tuesday   : Scoreboard + Transactions
     Wednesday : Scoreboard + Transactions
-    Thursday  : Scoreboard + Standings
+    Thursday  : Scoreboard + Standings + Transactions
     Friday    : Scoreboard + Transactions
-    Saturday  : Scoreboard + Injury Alerts
-    Sunday    : Scoreboard + Division Rankings
+    Saturday  : Scoreboard + Injury Alerts + Transactions
+    Sunday    : Scoreboard + Division Rankings + Transactions
     """
     day = datetime.now().weekday()  # 0=Mon ... 6=Sun
     schedule = {
-        "scoreboard":         [1, 2, 3, 4, 5, 6],  # Tue-Sun
-        "matchups":           [0],                   # Mon only
-        "trophies":           [0],                   # Mon only
-        "transactions":       [1, 2, 4],             # Tue, Wed, Fri
-        "standings":          [3],                   # Thu only
-        "injury_alerts":      [5],                   # Sat only
-        "division_rankings":  [6],                   # Sun only
+        "scoreboard":        [1, 2, 3, 4, 5, 6],   # Tue-Sun
+        "matchups":          [0],                    # Mon only
+        "trophies":          [0],                    # Mon only
+        "standings":         [3],                    # Thu only
+        "injury_alerts":     [5],                    # Sat only
+        "division_rankings": [6],                    # Sun only
+        "transactions":      [0, 1, 2, 3, 4, 5, 6], # Every day
     }
     return day in schedule.get(task, [])
  
-# ─── Main (runs on ping or startup) ──────────────────────────────────────────
+# ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     # ── Time window check (8am-10am Eastern) ──────────────────────────────────
     now = datetime.utcnow() - timedelta(hours=4)  # UTC-4 = Eastern Daylight Time
@@ -295,10 +301,10 @@ def main():
         "matchups":          get_matchups,
         "trophies":          get_trophies,
         "scoreboard":        get_scoreboard,
-        "transactions":      get_transactions,
         "standings":         get_standings,
         "injury_alerts":     get_injury_alerts,
         "division_rankings": get_division_rankings,
+        "transactions":      get_transactions,  # Always last so it caps each day's post
     }
  
     for task, fn in task_map.items():
@@ -311,9 +317,6 @@ def main():
  
 # ─── Entry point ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Start the web server in the background
     threading.Thread(target=start_server, daemon=True).start()
-    # Run the bot once on startup
     main()
-    # Keep the process alive so Render doesn't shut down
     threading.Event().wait()

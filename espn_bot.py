@@ -154,8 +154,12 @@ def get_transactions(league):
  
         for action in activity:
             action_date = getattr(action, 'date', None)
-            if action_date and action_date < cutoff:
-                continue
+            if action_date:
+                # ESPN returns date as milliseconds timestamp integer
+                if isinstance(action_date, int):
+                    action_date = datetime.utcfromtimestamp(action_date / 1000)
+                if action_date < cutoff:
+                    continue
  
             for team, move, player in action.actions:
                 if move in ("WAIVER ADDED", "FA ADDED", "DROPPED", "ADDED"):

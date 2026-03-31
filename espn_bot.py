@@ -21,11 +21,11 @@ class PingHandler(BaseHTTPRequestHandler):
             threading.Thread(target=main).start()
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"Bot triggered!")
+            self.wfile.write(b"OK")  # Short response to avoid cron-job.org output too large error
         else:
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"Fantasy Baseball Bot is running!")
+            self.wfile.write(b"OK")  # Short response for UptimeRobot ping
  
     def log_message(self, format, *args):
         pass  # Suppress noisy request logs
@@ -58,8 +58,7 @@ def get_league():
 def get_scoreboard(league):
     try:
         box_scores = league.box_scores()
-        current_week = league.current_week
-        lines = [f"⚾ **Week {current_week} Scoreboard**\n"]
+        lines = [f"⚾ **Current Week Scoreboard**\n"]
         for match in box_scores:
             home = match.home_team
             away = match.away_team
@@ -92,8 +91,7 @@ def get_standings(league):
 def get_matchups(league):
     try:
         box_scores = league.box_scores()
-        current_week = league.current_week
-        lines = [f"🗓️ **Week {current_week} Matchups**\n"]
+        lines = [f"🗓️ **Current Week Matchups**\n"]
         for match in box_scores:
             home = match.home_team
             away = match.away_team
@@ -102,25 +100,10 @@ def get_matchups(league):
     except Exception as e:
         return f"⚠️ Could not fetch matchups: {e}"
  
-# ─── Feature: Power Rankings ──────────────────────────────────────────────────
-def get_power_rankings(league):
-    try:
-        current_week = league.current_week
-        if current_week < 2:
-            return "📈 **Power Rankings** — Not enough data yet!"
-        rankings = league.power_rankings(week=current_week - 1)
-        lines = ["📈 **Power Rankings**\n"]
-        for i, (score, team) in enumerate(rankings, 1):
-            lines.append(f"{i}. **{team.team_name}** — {float(score):.2f}")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"⚠️ Could not fetch power rankings: {e}"
- 
 # ─── Feature: Trophies ────────────────────────────────────────────────────────
 def get_trophies(league):
     try:
         box_scores = league.box_scores()
-        current_week = league.current_week
  
         scores = []
         margins = []
@@ -145,7 +128,7 @@ def get_trophies(league):
         biggest_win_diff, biggest_win_team, biggest_win_loser, bw_hs, bw_as = margins[0]
         closest_win_diff, closest_win_team, closest_win_loser, cw_hs, cw_as = margins[-1]
  
-        lines = [f"🏆 **Last Week Trophies**\n"]
+        lines = ["🏆 **Last Week Trophies**\n"]
         lines.append(f"🔥 **High Score:** {high_score_team.team_name} — {high_score_val:.1f} pts")
         lines.append(f"💩 **Low Score:** {low_score_team.team_name} — {low_score_val:.1f} pts")
         lines.append(
@@ -207,6 +190,62 @@ def get_injury_alerts(league):
     except Exception as e:
         return f"⚠️ Could not fetch injury alerts: {e}"
  
+# ─── Feature: Division Rankings ──────────────────────────────────────────────
+def get_division_rankings(league):
+    try:
+        # Group teams by division
+        divisions = {}
+        for team in league.teams:
+            div = getattr(team, "division_id", None)
+            div_name = getattr(team, "division_name", f"Division {div}")
+            if div_name not in divisions:
+                divisions[div_name] = []
+            divisions[div_name].append(team)
+ 
+        if not divisions:
+            return "🏟️ **Division Rankings** — No divisions found in this league."
+ 
+        # Build streak per team
+        def get_streak(team):
+            outcomes = getattr(team, "outcomes", [])
+            if not outcomes:
+                return "—"
+            # outcomes is a list like ['W','W','L'] most recent last
+            streak_char = outcomes[-1]
+            count = 0
+            for result in reversed(outcomes):
+                if result == streak_char:
+                    count += 1
+                else:
+                    break
+            if streak_char == "W" and count >= 3:
+                return f"🔥 W{count}"
+            elif streak_char == "W":
+                return f"W{count}"
+            else:
+                return f"L{count}"
+ 
+        division_emojis = ["⚡", "🌊", "🔥", "💨"]
+        lines = ["🏟️ **Division Rankings**\n"]
+ 
+        for i, (div_name, teams) in enumerate(sorted(divisions.items())):
+            emoji = division_emojis[i] if i < len(division_emojis) else "🏟️"
+            lines.append(f"**{emoji} {div_name}**")
+            sorted_teams = sorted(teams, key=lambda t: (t.wins, t.points_for), reverse=True)
+            for rank, team in enumerate(sorted_teams, 1):
+                streak = get_streak(team)
+                lines.append(
+                    f"{rank}. **{team.team_name}** — "
+                    f"{team.wins}W-{team.losses}L | "
+                    f"{team.points_for:.1f} pts | "
+                    f"{streak}"
+                )
+            lines.append("")  # blank line between divisions
+ 
+        return "\n".join(lines).strip()
+    except Exception as e:
+        return f"⚠️ Could not fetch division rankings: {e}"
+ 
 # ─── Schedule logic ───────────────────────────────────────────────────────────
 def should_run(task: str) -> bool:
     """
@@ -216,17 +255,17 @@ def should_run(task: str) -> bool:
     Thursday  : Scoreboard + Standings
     Friday    : Scoreboard + Transactions
     Saturday  : Scoreboard + Injury Alerts
-    Sunday    : Scoreboard + Power Rankings
+    Sunday    : Scoreboard + Division Rankings
     """
     day = datetime.now().weekday()  # 0=Mon ... 6=Sun
     schedule = {
-        "scoreboard":     [1, 2, 3, 4, 5, 6],  # Tue-Sun
-        "matchups":       [0],                   # Mon only
-        "trophies":       [0],                   # Mon only
-        "transactions":   [1, 2, 4],             # Tue, Wed, Fri
-        "standings":      [3],                   # Thu only
-        "injury_alerts":  [5],                   # Sat only
-        "power_rankings": [6],                   # Sun only
+        "scoreboard":         [1, 2, 3, 4, 5, 6],  # Tue-Sun
+        "matchups":           [0],                   # Mon only
+        "trophies":           [0],                   # Mon only
+        "transactions":       [1, 2, 4],             # Tue, Wed, Fri
+        "standings":          [3],                   # Thu only
+        "injury_alerts":      [5],                   # Sat only
+        "division_rankings":  [6],                   # Sun only
     }
     return day in schedule.get(task, [])
  
@@ -253,13 +292,13 @@ def main():
     league = get_league()
  
     task_map = {
-        "matchups":       get_matchups,
-        "trophies":       get_trophies,
-        "scoreboard":     get_scoreboard,
-        "transactions":   get_transactions,
-        "standings":      get_standings,
-        "injury_alerts":  get_injury_alerts,
-        "power_rankings": get_power_rankings,
+        "matchups":          get_matchups,
+        "trophies":          get_trophies,
+        "scoreboard":        get_scoreboard,
+        "transactions":      get_transactions,
+        "standings":         get_standings,
+        "injury_alerts":     get_injury_alerts,
+        "division_rankings": get_division_rankings,
     }
  
     for task, fn in task_map.items():

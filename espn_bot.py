@@ -75,13 +75,12 @@ def get_scoreboard(league):
 # ─── Feature: Standings ───────────────────────────────────────────────────────
 def get_standings(league):
     try:
-        teams = sorted(league.teams, key=lambda t: (t.wins, t.points_for), reverse=True)
+        teams = sorted(league.teams, key=lambda t: t.wins, reverse=True)
         lines = ["📊 **Current Standings**\n"]
         for i, team in enumerate(teams, 1):
             lines.append(
                 f"{i}. **{team.team_name}** — "
-                f"{team.wins}W-{team.losses}L  "
-                f"({team.points_for:.1f} pts)"
+                f"{team.wins}W-{team.losses}L"
             )
         return "\n".join(lines)
     except Exception as e:

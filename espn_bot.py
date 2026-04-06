@@ -1,4 +1,5 @@
 import os
+import time
 import tempfile
 import threading
 import requests
@@ -45,6 +46,7 @@ def send_discord(message: str):
         payload = {"content": chunk}
         r = requests.post(DISCORD_WEBHOOK, json=payload)
         r.raise_for_status()
+        time.sleep(1.5)
  
 # ─── League connection ────────────────────────────────────────────────────────
 def get_league():
@@ -149,12 +151,11 @@ def get_transactions(league):
         lines = ["🔄 **Recent Transactions**\n"]
         found = False
  
-        cutoff = datetime.utcnow() - timedelta(hours=28)  # 28hrs to catch overnight activity
+        cutoff = datetime.utcnow() - timedelta(hours=28)
  
         for action in activity:
             action_date = getattr(action, 'date', None)
             if action_date:
-                # ESPN returns date as milliseconds timestamp integer
                 if isinstance(action_date, int):
                     action_date = datetime.utcfromtimestamp(action_date / 1000)
                 if action_date < cutoff:
@@ -268,20 +269,20 @@ def should_run(task: str) -> bool:
     """
     day = datetime.now().weekday()  # 0=Mon ... 6=Sun
     schedule = {
-        "scoreboard":        [1, 2, 3, 4, 5, 6],   # Tue-Sun
-        "matchups":          [0],                    # Mon only
-        "trophies":          [0],                    # Mon only
-        "standings":         [3],                    # Thu only
-        "injury_alerts":     [5],                    # Sat only
-        "division_rankings": [6],                    # Sun only
-        "transactions":      [0, 1, 2, 3, 4, 5, 6], # Every day
+        "scoreboard":        [1, 2, 3, 4, 5, 6],
+        "matchups":          [0],
+        "trophies":          [0],
+        "standings":         [3],
+        "injury_alerts":     [5],
+        "division_rankings": [6],
+        "transactions":      [0, 1, 2, 3, 4, 5, 6],
     }
     return day in schedule.get(task, [])
  
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     # ── Time window check (8am-10am Eastern) ──────────────────────────────────
-    now = datetime.utcnow() - timedelta(hours=4)  # UTC-4 = Eastern Daylight Time
+    now = datetime.utcnow() - timedelta(hours=4)
     if not (8 <= now.hour < 10):
         print(f"Outside posting window ({now.hour}:00 ET). Skipping.")
         return
@@ -297,7 +298,8 @@ def main():
     # ── Run ───────────────────────────────────────────────────────────────────
     if INIT_MSG:
         send_discord(INIT_MSG)
- 
+        time.sleep(2)
+
     league = get_league()
  
     task_map = {
@@ -307,7 +309,7 @@ def main():
         "standings":         get_standings,
         "injury_alerts":     get_injury_alerts,
         "division_rankings": get_division_rankings,
-        "transactions":      get_transactions,  # Always last so it caps each day's post
+        "transactions":      get_transactions,
     }
  
     for task, fn in task_map.items():
@@ -315,6 +317,7 @@ def main():
             msg = fn(league)
             send_discord(msg)
             print(f"[{task}] sent.")
+            time.sleep(2)
         else:
             print(f"[{task}] skipped (not scheduled today).")
  
@@ -323,3 +326,4 @@ if __name__ == "__main__":
     threading.Thread(target=start_server, daemon=True).start()
     main()
     threading.Event().wait()
+

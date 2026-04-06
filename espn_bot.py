@@ -44,8 +44,15 @@ def send_discord(message: str):
     chunks = [message[i:i+1900] for i in range(0, len(message), 1900)]
     for chunk in chunks:
         payload = {"content": chunk}
-        r = requests.post(DISCORD_WEBHOOK, json=payload)
-        r.raise_for_status()
+        for attempt in range(5):
+            r = requests.post(DISCORD_WEBHOOK, json=payload)
+            if r.status_code == 429:
+                retry_after = r.json().get("retry_after", 5)
+                print(f"Rate limited. Waiting {retry_after}s before retry...")
+                time.sleep(retry_after + 1)
+            else:
+                r.raise_for_status()
+                break
         time.sleep(1.5)
  
 # ─── League connection ────────────────────────────────────────────────────────
@@ -299,7 +306,7 @@ def main():
     if INIT_MSG:
         send_discord(INIT_MSG)
         time.sleep(2)
-
+ 
     league = get_league()
  
     task_map = {
@@ -326,4 +333,5 @@ if __name__ == "__main__":
     threading.Thread(target=start_server, daemon=True).start()
     main()
     threading.Event().wait()
+
 
